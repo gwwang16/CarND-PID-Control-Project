@@ -17,6 +17,8 @@ public:
   double Ki;
   double Kd;
 
+  int steps;
+  double total_err;
   /*
   * Constructor
   */
@@ -30,7 +32,7 @@ public:
   /*
   * Initialize PID.
   */
-  void Init(double Kp, double Ki, double Kd);
+  void Init(double kp_, double ki_, double kd_);
 
   /*
   * Update the PID error variables given cross track error.

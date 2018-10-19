@@ -10,14 +10,17 @@ PID::PID() {}
 
 PID::~PID() {}
 
-void PID::Init(double kp, double ki, double kd) {
-	Kp = kp;
-	Ki = ki;
-	Kd = kd;
+void PID::Init(double kp_, double ki_, double kd_) {
+	Kp = kp_;
+	Ki = ki_;
+	Kd = kd_;
 
 	p_error = 0;
 	i_error = 0;
 	d_error = 0;
+
+  steps = 0;
+  total_err = 0;
 }
 
 void PID::UpdateError(double cte) {
@@ -25,13 +28,18 @@ void PID::UpdateError(double cte) {
 	p_error = cte;
 	i_error += cte;
 
+  steps += 1;
 }
 
 double PID::TotalError() {
-	return 0;
+
+  total_err += (p_error*p_error);
+
+	return total_err;
 }
 
 double PID::Controller(){
+
 	return -Kp*p_error - Ki*i_error - Kd*d_error;
 }
 
