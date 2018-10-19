@@ -15,7 +15,7 @@ double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
 int reset_time = 0;
-int cte_r = 0; // aux cte variable
+int n_iter = 0; // main loop counter for removing error feedback before connected.
 
 // Resetting the Simulator
 void reset_simulator(uWS::WebSocket<uWS::SERVER>& ws) {
@@ -23,18 +23,26 @@ void reset_simulator(uWS::WebSocket<uWS::SERVER>& ws) {
   ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 }
 
+//struct for storing best params
+struct params{
+  vector<double> p; 
+  vector<double> dp;
+};
 
 class Twiddle {
 public:
-  vector<double> best_params, p, dp;
+  vector<double> p, dp;
   int num_params, idx;
   double best_err, avg_err, err;
-  bool is_using, is_initialized;
-  bool flag_fw, flag_bw;
+  bool is_using, flag_fw, is_initialized;
+  params best_params;
 
   Twiddle();
+
   virtual ~Twiddle();
+
   void Init(double kp_, double ki_, double kd_);
+
   void Update();
 };
 
@@ -43,20 +51,26 @@ Twiddle::Twiddle() {}
 Twiddle::~Twiddle() {}
 
 void Twiddle::Init(double kp_, double ki_, double kd_) {
+  
   is_using = true;
-
   flag_fw = false;
-  flag_bw = false;
 
   num_params = 3;
-
   best_err = 999;
   err = 0;
   avg_err = 0;
   idx = 0;
 
   p = {kp_, ki_, kd_};
-  dp = {1.0, 1.0, 1.0};
+  best_params.p = {0, 0, 0};
+  best_params.dp = {0, 0, 0};
+
+  // dp = {1.0, 1.0, 1.0};
+
+  //use beter reasonable dp initialization
+  // dp = {1.0, 0.01, 1.0};
+  //continue with last training state
+  dp = {0.211095, 0.000633249, 0.157012};
 
   is_initialized = false;
 }
@@ -67,7 +81,6 @@ void Twiddle::Update() {
   if (!is_initialized) {
     best_err = err;
     flag_fw = true;
-    flag_bw = false;
 
     // the first step: update kp gain
     p[idx] += dp[idx];
@@ -76,27 +89,23 @@ void Twiddle::Update() {
   else {
     if (err < best_err) {
       best_err = err;
+      best_params.p = p;
+      best_params.dp = dp;
       dp[idx] *= 1.1;
       // switch into the next pid param
       idx = (idx + 1) % 3;
-
       flag_fw = true;
-      flag_bw = false;
     }
     else {
       if (flag_fw) {
-
         p[idx] -= 2 * dp[idx];
         flag_fw = false;
-        flag_bw = true;
       }
       else {
         p[idx] += dp[idx];
         dp[idx] *= 0.9;
         idx = (idx + 1) % 3;
-
         flag_fw = true;
-        flag_bw = false;
       }
     }
     if (flag_fw) {
@@ -128,11 +137,17 @@ int main()
   uWS::Hub h;
 
   PID pid;
-  // TODO: Initialize the pid variable.
-  pid.Init(0.1, 0.01, 1);
-
   Twiddle tw;
-  tw.Init(0.1, 0.01, 1);
+
+  // Initialize the pid and twiddle variable.
+  // pid.Init(0.1, 0.01, 1);
+  // tw.Init(0.1, 0.01, 1);
+
+  //final params for running
+  pid.Init(0.3, 0.000180134, 4.54589);
+  tw.Init(0.3, 0.000180134, 4.54589);
+  //set this flag to true for twiddle tunning
+  tw.is_using = false;
 
   h.onMessage([&pid, &tw](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -150,61 +165,58 @@ int main()
           double speed = std::stod(j[1]["speed"].get<std::string>());
           double angle = std::stod(j[1]["steering_angle"].get<std::string>());
           double steer_value;
-          /*
-          * TODO: Calcuate steering value here, remember the steering value is
-          * [-1, 1].
-          * NOTE: Feel free to play around with the throttle and speed. Maybe use
-          * another PID controller to control the speed!
-          */
 
-          pid.UpdateError(cte);
-          steer_value = pid.Controller();
+          //update main loop times
+          n_iter += 1;
+          //remove cte before connected
+          if (n_iter > 2) {
 
-          // limit steer value to -1,1 range
-          steer_value = steer_value < -1 ? -1 : steer_value;
-          steer_value = steer_value > 1 ? 1 : steer_value;
+            pid.UpdateError(cte);
+            steer_value = pid.Controller();
 
-          //remove high disturbance at the very beginning
-          if (pid.steps > 5) {
+            //limit steer value to -1,1 range
+            steer_value = steer_value < -1 ? -1 : steer_value;
+            steer_value = steer_value > 1 ? 1 : steer_value;
+
+            //calculate total square error
             pid.TotalError();
-            cte_r = cte;
-          }
 
-          // DEBUG
-          // std::cout << "CTE: " << cte << "\tSteering Value: " << steer_value << " \tstep counter: " << pid.steps << std::endl;
-          // cout << "pid steps: " << pid.steps << endl;
+            //monitor first error
+            if(pid.steps<2){
+              cout << "cte in the beginning: " << cte << endl;
+            }
 
-          //reset simulator for twiddle params tuning
-          if ((pid.steps > 2000 || fabs(cte_r) > 3 ) & tw.is_using) {
+            //reset simulator for twiddle params tuning
+            //when the vehicle running enough distance or out of road
+            if ((pid.steps > 2000 || fabs(cte) > 3 ) & tw.is_using) {
+              //assign large error if the car out of road
+              tw.avg_err = pid.total_err / pid.steps;
+              if (fabs(cte) > 3) {tw.err = tw.avg_err + 100.0;}
+              else {tw.err = tw.avg_err;}
 
-            //assign large error if the car out of road
-            tw.avg_err = pid.total_err / pid.steps;
-            if (fabs(cte) > 3) {tw.err = tw.avg_err + 100.0;}
-            else {tw.err = tw.avg_err;}
+              //unactive twiddle if performance is good enough
+              if (tw.err < 0.01) {tw.is_using = false;}
 
-            //unactive twiddle if performance is good enough
-            if (tw.err < 0.001) {tw.is_using = false;}
+              //update pid params using twiddle
+              tw.Update();
+              
+              //print out some results
+              cout << "kp: " << tw.p[0] << "\tki: " << tw.p[1] << "\tkd: " << tw.p[2] << endl;
+              cout << "dkp: " << tw.dp[0] << "\tdki: " << tw.dp[1] << "\tdkd: " << tw.dp[2] << endl;
+              cout << "Best PID params: " << tw.best_params.p[0] << "\t" << tw.best_params.p[1] << "\t" << tw.best_params.p[2] << endl;
+              cout << "Best dp params: " << tw.best_params.dp[0] << "\t" << tw.best_params.dp[1] << "\t" << tw.best_params.dp[2] << endl;
+              cout << "Best err: " << tw.best_err << "\tcurrent err: " << tw.err << "\tcurrent idx: " << tw.idx << endl;
+              cout << "Reset Simulator Times: " << (reset_time += 1) << endl;
+              cout << "--------------------" << endl;
 
-            //update pid params using twiddle
-            tw.Update();
+              //initialize pid with new params
+              pid.Init(tw.p[0], tw.p[1], tw.p[2]);
 
-            pid.Kp = tw.p[0];
-            pid.Ki = tw.p[1];
-            pid.Kd = tw.p[2];
-            cout << "---------------------------" << endl;
-            cout << "Reset Simulator. Times: " << (reset_time += 1) << endl;
-            cout << "---------------------------" << endl;
-            cout << "kp: " << tw.p[0] << "\tki: " << tw.p[1] << "\tkd: " << tw.p[2];
-            cout << "\tdkp: " << tw.dp[0] << "\tdki: " << tw.dp[1] << "\tdkd: " << tw.dp[2] << endl;
-            cout << "Best err: " << tw.best_err << "\tcurrent err: " << tw.err << "\tcurrent idx: " << tw.idx << endl;
-
-            pid.total_err = 0;
-            pid.steps = 0;
-
-            reset_simulator(ws);
-            cte = 0;
-            cte_r = 0;
-            sleep(0.5); // wait for reseting sim
+              //reset simulator
+              reset_simulator(ws);
+              n_iter = 0;
+              sleep(0.5); // waiting for reseting sim
+            }
           }
 
           json msgJson;

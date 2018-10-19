@@ -1,9 +1,117 @@
-# CarND-Controls-PID
+# PID Control Project
 Self-Driving Car Engineer Nanodegree Program
 
 ---
 
-## Dependencies
+I implemented a PID controller with C++ for vehicle lane tracking in the simulator. The PID controller's parameters are automatically tuned by twiddle method.
+
+### Results
+
+The performance is not good enough, especially for the curve road tracking, it might be caused by the straight road is mainly used for training PID params at the beginning, and  twiddle is stuck into local minimum. 
+The performance can be better with larger running steps, but it would cost much more time. More sophicticated cost function (such as running distance on the track included) might also be useful otherwise using MSE to determine controller's performance. However, it has found PID parameters which can run a full lap. 
+
+The final parameters are shown as following
+
+| PID |   `Kp`  |   `Ki`  |   `Kd`  |
+| ---- | ----- | ----- | ----- |
+| Initiation | 0.1 | 0.01 | 1 |
+| Tuned params  | 0.504175   | 0.000180134 | 4.54589 |
+
+| Twiddle |   `dKp`  |   `dKi`  |   `dKd`  |
+| ---- | ----- | ----- | ----- |
+| Initiation | 1 | 0.01 | 1 |
+| Final params  | 0.0721396 | 0.000216406 | 0.0655811 |
+
+  ![](img/result.png)
+
+Even though the vehicle can run a lap with the previous PID parameters, I modified them manually based on the previous results to gain a robust performance.
+
+The final PID parameters are
+
+| PID |   `Kp`  |   `Ki`  |   `Kd`  |
+| ---- | ----- | ----- | ----- |
+| Tuned params  | 0.3   | 0.000180134 | 4.54589 |
+
+
+
+
+### Reflection
+
+- I firstly initialized PID parameters  Kp, Ki and Kd with `[0.1, 0.01, 1]` from experience of `Kp = 0.1*Kd, Ki = 0.1*Kp`.
+
+- Then these parameters are tuned with twiddle method with `dp` of `[1, 1, 1]`. However, I found the `dp[1]` is too large for `Ki`. `dp[1]` is always decreasing in the first 60 epochs. Hence, I reinitialized the `dp` with `[1, 0.01, 1]` for converging faster.
+  ![](img/twiddle_1.png)
+
+- After hundreds of simulator restarting, the final result indicates that we can manually set initial PID parameters and using small `dp` to fine tuning them. It would save a lot of time.
+
+### Code snippets
+
+- The following code is used for automatic restarting simulator (found it on forum)
+```
+void reset_simulator(uWS::WebSocket<uWS::SERVER>& ws) {
+  std::string msg("42[\"reset\",{}]");
+  ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+}
+```
+- There are some unusual error feedback before simulator connected after using auto reset,  a `if...else` is simply used to remove this.
+
+```
+if(n_iter>2)
+{
+    PID and Twiddle...
+}
+```
+  ![](img/large_error.png)
+
+- Twiddle method in Python code
+
+```
+def twiddle(tol=1e-10): 
+    p = [0, 0, 0]
+    dp = [1, 1, 1]
+    robot = make_robot()
+    x_trajectory, y_trajectory, best_err = run(robot, p)
+    while best_err > tol:
+        for i in range(3):
+            p[i] += dp[i]
+            robot = make_robot()
+            x_trajectory, y_trajectory, err = run(robot, p)
+            if err < best_err:
+                best_err = err
+                dp[i] *= 1.1
+            else:
+                p[i] -= 2*dp[i]
+                robot = make_robot()
+                x_trajectory, y_trajectory, err = run(robot, p)
+                if err < best_err:
+                    best_err = err
+                    dp[i] *= 1.1
+                else:
+                    p[i] += dp[i]
+                    dp[i] *= 0.9
+    return p, best_err
+```
+
+Pseudo Twiddle Code by Sebastian Thrun.
+![](img/pseudo_twiddle.png)
+
+
+
+### Build steps
+
+1. Clone this repo.
+2. Make a build directory: `mkdir build && cd build`
+3. Compile: `cmake .. && make`
+4. Run it: `./pid`. 
+
+Alternatively some scripts have been included to streamline this process, these can be leveraged by executing the following in the top directory of the project:
+
+1. ./clean.sh
+2. ./build.sh
+3. ./run.sh
+
+
+### Dependencies
 
 * cmake >= 3.5
  * All OSes: [click here for installation instructions](https://cmake.org/install/)
@@ -23,76 +131,5 @@ Self-Driving Car Engineer Nanodegree Program
     cd uWebSockets
     git checkout e94b6e1
     ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
-* Simulator. You can download these from the [project intro page](https://github.com/udacity/self-driving-car-sim/releases) in the classroom.
 
-There's an experimental patch for windows in this [PR](https://github.com/udacity/CarND-PID-Control-Project/pull/3)
-
-## Basic Build Instructions
-
-1. Clone this repo.
-2. Make a build directory: `mkdir build && cd build`
-3. Compile: `cmake .. && make`
-4. Run it: `./pid`. 
-
-Tips for setting up your environment can be found [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/e8235395-22dd-4b87-88e0-d108c5e5bbf4/concepts/6a4d8d42-6a04-4aa6-b284-1697c0fd6562)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
+- This project involves the Simulator which can be downloaded [here](https://github.com/udacity/self-driving-car-sim/releases)
