@@ -66,11 +66,8 @@ void Twiddle::Init(double kp_, double ki_, double kd_) {
   best_params.dp = {0, 0, 0};
 
   // dp = {1.0, 1.0, 1.0};
-
   //use beter reasonable dp initialization
-  // dp = {1.0, 0.01, 1.0};
-  //continue with last training state
-  dp = {0.211095, 0.000633249, 0.157012};
+  dp = {1.0, 0.01, 1.0};
 
   is_initialized = false;
 }
